@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using dotNetExt;
 using PowerArgs;
 using Exception = System.Exception;
 
@@ -38,28 +39,24 @@ namespace LeafToCRERPEImport
             public string PosId;
         }
 
+        private class JobCodeMapping
+        {
+            public string LeafId;
+            public JobCode PosJobCode;
+        }
+
         private class ModGroupMapping
         {
             public string LeafId;
-            public PosModifierGroup PosModifierGroup;
+            public ModifierGroup PosModifierGroup;
         }
 
         private class ItemMapping
         {
             public string LeafId;
-            public PosItem PosItem;
+            public Inventory PosItem;
         }
-
-        private class PosModifierGroup
-        {
-
-        }
-
-        private class PosItem
-        {
-
-        }
-
+        
         public class CommandLineArgs
         {
             [ArgRequired]
@@ -78,11 +75,11 @@ namespace LeafToCRERPEImport
 
         private static Dictionary<string, int> _taxMap;
         private static Dictionary<string, string> _printerMap;
-        private static Dictionary<string, string> _jobCodeMap;
+        private static Dictionary<string, JobCode> _jobCodeMap;
         private static Dictionary<string, string> _departmentMap;
         private static Dictionary<string, string> _modifierMap;
-        private static Dictionary<string, PosModifierGroup> _modifierGroupsMap;
-        private static Dictionary<string, PosItem> _itemMap;
+        private static Dictionary<string, ModifierGroup> _modifierGroupsMap;
+        private static Dictionary<string, Inventory> _itemMap;
         private static Dictionary<string, int> _counters;
 
         #endregion
@@ -95,11 +92,11 @@ namespace LeafToCRERPEImport
 
                 _taxMap = new Dictionary<string, int>();
                 _printerMap = new Dictionary<string, string>();
-                _jobCodeMap = new Dictionary<string, string>();
+                _jobCodeMap = new Dictionary<string, JobCode>();
                 _departmentMap = new Dictionary<string, string>();
                 _modifierMap = new Dictionary<string, string>();
-                _modifierGroupsMap = new Dictionary<string, PosModifierGroup>();
-                _itemMap = new Dictionary<string, PosItem>();
+                _modifierGroupsMap = new Dictionary<string, ModifierGroup>();
+                _itemMap = new Dictionary<string, Inventory>();
                 _counters = new Dictionary<string, int>();
 
                 var stopwatch = new Stopwatch();
@@ -114,14 +111,16 @@ namespace LeafToCRERPEImport
 
                         SetupStore(db, leafStore);
                         SetupTaxes(db, leafStore);
-                        //SetupPrinters(db, leafStore);
-                        //SetupJobCodes(db, leafStore);
-                        //SetupUsers(db, leafStore);
-                        //SetupDepartments(db, leafStore);
+                        SetupPrinters(db, leafStore);
+                        SetupJobCodes(db, leafStore);
+                        SetupUsers(db, leafStore);
+                        SetupDepartments(db, leafStore);
                         //SetupModifiers(db, leafStore);
                         //SetupModifierGroups(db, leafStore);
                         //SetupItems(db, leafStore);
                         //SetupMenu(db, leafStore);
+
+                        db.SaveChanges();
                     }
                 }
                 stopwatch.Stop();
@@ -184,19 +183,17 @@ namespace LeafToCRERPEImport
                 db.Add(setup);
             }
 
-            setup.CompanyInfo1 = leafStore.siteName;
+            setup.CompanyInfo1 = leafStore.siteName.Left(30);
             setup.CompanyInfo2 = "";
             setup.CompanyInfo3 = "";
             setup.CompanyInfo4 = "";
             setup.CompanyInfo5 = "";
-            setup.StoreEmail = leafStore.siteEmail;
-            setup.Phone1 = leafStore.sitePhone;
-            setup.Address = leafStore.primary_address.address;
-            setup.City = leafStore.primary_address.city;
-            setup.State = leafStore.primary_address.stateShort;
-            setup.ZipCode = leafStore.primary_address.postalCode;
-
-            db.SaveChanges();
+            setup.StoreEmail = leafStore.siteEmail.Left(50);
+            setup.Phone1 = leafStore.sitePhone.Left(15);
+            setup.Address = leafStore.primary_address.address.Left(30);
+            setup.City = leafStore.primary_address.city.Left(30);
+            setup.State = leafStore.primary_address.stateShort.Left(20);
+            setup.ZipCode = leafStore.primary_address.postalCode.Left(10);
 
             IncrementCounter(Counters.Setup);
             Log("Updated Store");
@@ -229,10 +226,177 @@ namespace LeafToCRERPEImport
                 _taxMap.Add("bevTax", 3);
             }
 
-            db.SaveChanges();
-
             IncrementCounter(Counters.TaxRate);
             Log("Updated Tax Rates");
+        }
+
+        private static void SetupPrinters(CreModel db, LeafDataModel.Store leafStore)
+        {
+            foreach (var printer in leafStore.printers)
+            {
+                var map = CreatePrinter(db, printer);
+                if (map != null) _printerMap.Add(map.LeafId, map.PosId);
+            }
+        }
+
+        private static Mapping CreatePrinter(CreModel db, LeafDataModel.Printer leafPrinter)
+        {
+            var existing = db.FriendlyPrinters.FirstOrDefault(o => o.PrinterName == leafPrinter.printerName);
+
+            if (existing != null)
+                return new Mapping {LeafId = leafPrinter.printerName, PosId = existing.PrinterName};
+
+            var printer = new FriendlyPrinter {PrinterName = leafPrinter.printerName.Left(30), StoreID = "1001"};
+            db.Add(printer);
+
+            IncrementCounter(Counters.KitchenPrinter);
+
+            Log("Created printer {0}", printer.PrinterName);
+
+            return new Mapping {LeafId = leafPrinter.id, PosId = printer.PrinterName};
+        }
+
+        private static void SetupJobCodes(CreModel db, LeafDataModel.Store leafStore)
+        {
+            foreach (var jobCode in leafStore.job_codes)
+            {
+                var map = CreateJobCode(db, jobCode);
+                if (map != null) _jobCodeMap.Add(map.LeafId, map.PosJobCode);
+            }
+        }
+
+        private static JobCodeMapping CreateJobCode(CreModel db, LeafDataModel.JobCode leafJobCode)
+        {
+            var existing = db.JobCodes.FirstOrDefault(o => o.JobCodeID == leafJobCode.id);
+
+            if (existing != null)
+                return new JobCodeMapping {LeafId = leafJobCode.id, PosJobCode = existing};
+
+            var jobCode = new JobCode
+            {
+                JobCodeID = leafJobCode.id.Left(15),
+                JobCodeName = leafJobCode.jobCode.Left(15),
+                AccessToPos = true,
+                DefaultWage = leafJobCode.rate1,
+                DefaultOvertimeWage = leafJobCode.otRate1
+            };
+
+            db.Add(jobCode);
+
+            var jobCodeStore = new JobCodeStore
+            {
+                JobCodeID = jobCode.JobCodeID,
+                StoreID = "1001"
+            };
+
+            db.Add(jobCodeStore);
+
+            IncrementCounter(Counters.Jobcode);
+
+            Log("Created jobcode {0}", jobCode.JobCodeName);
+
+            return new JobCodeMapping {LeafId = leafJobCode.id, PosJobCode = jobCode};
+        }
+
+        private static void SetupUsers(CreModel db, LeafDataModel.Store leafStore)
+        {
+            foreach (var user in leafStore.users)
+            {
+                CreateUser(db, user);
+            }
+        }
+
+        private static void CreateUser(CreModel db, LeafDataModel.User leafUser)
+        {
+            var existing = db.Employees.FirstOrDefault(e => e.CashierID == leafUser.id);
+
+            if (existing != null)
+                return;
+
+            var employee = new Employee
+            {
+                CashierID = leafUser.id,
+                EmpName = (leafUser.first + " " + leafUser.last).Left(30),
+                FirstName = leafUser.first.Left(15),
+                LastName = leafUser.last.Left(20),
+                EMail = leafUser.email.Left(50),
+                Phone1 = leafUser.phone,
+                FormColor = 16777215,
+                Password = "b`rghdqA1",
+                DispPayOption = true,
+                DispItemOption = true,
+                OrigStoreID = "1001",
+                CreateDate = DateTime.Today,
+                PasswordHash = "QSypaQoUu/LW+emLhHO7s+H6tk+MI9/hmqRlX4xSRrY=",
+                SaltKey = "vN9A6rY="
+            };
+
+            db.Add(employee);
+
+            var employeeStore = new EmployeeStore
+            {
+                CashierID = employee.CashierID,
+                StoreID = "1001"
+            };
+
+            db.Add(employeeStore);
+
+            IncrementCounter(Counters.Employee);
+
+            Log("Created employee {0}", employee.EmpName);
+
+            foreach (var leafJobCode in leafUser.job_code_users)
+            {
+                var jobCode = new EmployeeJobCode
+                {
+                    CashierID = employee.CashierID,
+                    JobCodeID = _jobCodeMap[leafJobCode.job_code_id].JobCodeID,
+                    HourlyWage =  _jobCodeMap[leafJobCode.job_code_id].DefaultWage,
+                    OvertimeHourlyWage = _jobCodeMap[leafJobCode.job_code_id].DefaultOvertimeWage
+                };
+                db.Add(jobCode);
+
+                IncrementCounter(Counters.EmployeeJobcode);
+            }
+        }
+
+        private static void SetupDepartments(CreModel db, LeafDataModel.Store leafStore)
+        {
+            foreach (var category in leafStore.catalog.categories)
+            {
+                var map = CreateDepartment(db, category);
+                if (map != null) _departmentMap.Add(map.LeafId, map.PosId);
+            }
+        }
+
+        private static Mapping CreateDepartment(CreModel db, LeafDataModel.Category leafCategory)
+        {
+            var existing = db.Departments.FirstOrDefault(o => o.DeptID == leafCategory.id);
+
+            if (existing != null)
+                return new Mapping {LeafId = leafCategory.id, PosId = existing.DeptID};
+
+            var department = new Department
+            {
+                StoreID = "1001",
+                DeptID = leafCategory.id,
+                Description = leafCategory.name.Left(30),
+                SubType = "NONE",
+                DeptNotes = "",
+                CostCalculationPercentage = 0,
+                SquareFootage = 0
+            };
+
+            if (department.Description.IsNullOrEmpty())
+                department.Description = department.DeptID;
+
+            db.Add(department);
+
+            IncrementCounter(Counters.Department);
+
+            Log("Created department {0}", department.Description);
+
+            return new Mapping {LeafId = leafCategory.id, PosId = department.DeptID};
         }
     }
 }
