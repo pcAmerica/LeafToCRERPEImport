@@ -19,8 +19,6 @@ namespace LeafToCRERPEImport
             public const string KitchenPrinter = "KitchenPrinter";
             public const string Jobcode = "Jobcode";
             public const string Employee = "Employee";
-            public const string EmployeeEmail = "EmployeeEmail";
-            public const string EmployeePhone = "EmployeePhone";
             public const string EmployeeJobcode = "EmployeeJobcode";
             public const string Department = "Department";
             public const string Modifier = "Modifier";
@@ -56,7 +54,7 @@ namespace LeafToCRERPEImport
             public string LeafId;
             public Inventory PosItem;
         }
-        
+
         public class CommandLineArgs
         {
             [ArgRequired]
@@ -115,7 +113,7 @@ namespace LeafToCRERPEImport
                         SetupJobCodes(db, leafStore);
                         SetupUsers(db, leafStore);
                         SetupDepartments(db, leafStore);
-                        //SetupModifiers(db, leafStore);
+                        SetupModifiers(db, leafStore);
                         //SetupModifierGroups(db, leafStore);
                         //SetupItems(db, leafStore);
                         //SetupMenu(db, leafStore);
@@ -351,7 +349,7 @@ namespace LeafToCRERPEImport
                 {
                     CashierID = employee.CashierID,
                     JobCodeID = _jobCodeMap[leafJobCode.job_code_id].JobCodeID,
-                    HourlyWage =  _jobCodeMap[leafJobCode.job_code_id].DefaultWage,
+                    HourlyWage = _jobCodeMap[leafJobCode.job_code_id].DefaultWage,
                     OvertimeHourlyWage = _jobCodeMap[leafJobCode.job_code_id].DefaultOvertimeWage
                 };
                 db.Add(jobCode);
@@ -397,6 +395,79 @@ namespace LeafToCRERPEImport
             Log("Created department {0}", department.Description);
 
             return new Mapping {LeafId = leafCategory.id, PosId = department.DeptID};
+        }
+
+        private static void SetupModifiers(CreModel db, LeafDataModel.Store leafStore)
+        {
+            foreach (var modifier in leafStore.catalog.modifiers)
+            {
+                var map = CreateModifier(db, modifier);
+                if (map != null) _modifierMap.Add(map.LeafId, map.PosId);
+            }
+        }
+
+        private static void SetDefaultItemProps(Inventory item)
+        {
+            item.StoreID = "1001";
+            item.DeptID = "NONE";
+            item.ModifierType = 0; // Standard
+            item.KitOverride = 0;
+            item.NumBoxes = 0;
+            item.Tear = 0;
+            item.NumPerCase = 0;
+            item.ReOrderCost = 0;
+            item.DateCreated = DateTime.Today;
+            item.ItemType = 0;
+            item.Inactive = 0;
+            item.UnitSize = 0;
+            item.FixedTax = 0;
+            item.DOB = 0;
+            item.PrintOnReceipt = true;
+            item.InStockCommitted = 0;
+            item.RequireCustomer = false;
+            item.PromptCompletionDate = false;
+            item.PromptInvoiceNotes = false;
+            item.PromptDescriptionOverDollarAmt = 0;
+            item.ExcludeFromLoyalty = false;
+            item.ScaleSingleDeduct = false;
+            item.ScaleItemType = 0;
+            item.DiscountType = 0;
+            item.AllowReturns = true;
+            item.SuggestedDeposit = 0;
+            item.Liability = false;
+            item.ShipCompliantProductType = "Null";
+            item.AlcoholContent = 0;
+        }
+
+        private static Mapping CreateModifier(CreModel db, LeafDataModel.Modifier leafModifier)
+        {
+            var existing = db.Inventories.Where(i => i.IsModifier).FirstOrDefault(o => o.ItemName == leafModifier.name);
+
+            if (existing != null)
+                return new Mapping {LeafId = leafModifier.id, PosId = existing.ItemNum};
+
+            var modifier = new Inventory
+            {
+                ItemNum = leafModifier.id,
+                ItemName = leafModifier.name.Left(30),
+                ItemNameExtra = leafModifier.description.Left(40),
+                Price = leafModifier.price,
+                Cost = leafModifier.cost,
+                IsModifier = true
+            };
+
+            SetDefaultItemProps(modifier);
+
+            if (modifier.ItemName.IsNullOrEmpty())
+                modifier.ItemName = modifier.ItemNum;
+
+            db.Add(modifier);
+
+            IncrementCounter(Counters.Modifier);
+
+            Log("Created modifier {0}", modifier.ItemName);
+
+            return new Mapping {LeafId = leafModifier.id, PosId = modifier.ItemNum};
         }
     }
 }
