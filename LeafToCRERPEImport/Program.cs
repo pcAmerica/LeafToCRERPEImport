@@ -3,18 +3,18 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using PowerArgs;
+using Exception = System.Exception;
 
 namespace LeafToCRERPEImport
 {
-    class Program
+    internal class Program
     {
+        #region Internal Classes
+
         private struct Counters
         {
+            public const string Setup = "Setup";
             public const string TaxRate = "TaxRate";
-            public const string TaxGroup = "TaxGroup";
-            public const string TaxGroupTaxRate = "TaxGroupTaxRate";
-            public const string Tender = "Tender";
-            public const string PaymentProfileTender = "PaymentProfileTender";
             public const string KitchenPrinter = "KitchenPrinter";
             public const string Jobcode = "Jobcode";
             public const string Employee = "Employee";
@@ -52,12 +52,12 @@ namespace LeafToCRERPEImport
 
         private class PosModifierGroup
         {
-            
+
         }
 
         private class PosItem
         {
-            
+
         }
 
         public class CommandLineArgs
@@ -72,27 +72,32 @@ namespace LeafToCRERPEImport
             public string ApiKey { get; set; }
         }
 
-        private static Dictionary<string, Guid> _taxMap;
-        private static Dictionary<string, Guid> _printerMap;
-        private static Dictionary<string, Guid> _jobCodeMap;
-        private static Dictionary<string, Guid> _departmentMap;
-        private static Dictionary<string, Guid> _modifierMap;
+        #endregion
+
+        #region Vars
+
+        private static Dictionary<string, int> _taxMap;
+        private static Dictionary<string, string> _printerMap;
+        private static Dictionary<string, string> _jobCodeMap;
+        private static Dictionary<string, string> _departmentMap;
+        private static Dictionary<string, string> _modifierMap;
         private static Dictionary<string, PosModifierGroup> _modifierGroupsMap;
         private static Dictionary<string, PosItem> _itemMap;
-
         private static Dictionary<string, int> _counters;
 
-        static void Main(string[] args)
+        #endregion
+
+        private static void Main(string[] args)
         {
             try
             {
                 var parsed = Args.Parse<CommandLineArgs>(args);
 
-                _taxMap = new Dictionary<string, Guid>();
-                _printerMap = new Dictionary<string, Guid>();
-                _jobCodeMap = new Dictionary<string, Guid>();
-                _departmentMap = new Dictionary<string, Guid>();
-                _modifierMap = new Dictionary<string, Guid>();
+                _taxMap = new Dictionary<string, int>();
+                _printerMap = new Dictionary<string, string>();
+                _jobCodeMap = new Dictionary<string, string>();
+                _departmentMap = new Dictionary<string, string>();
+                _modifierMap = new Dictionary<string, string>();
                 _modifierGroupsMap = new Dictionary<string, PosModifierGroup>();
                 _itemMap = new Dictionary<string, PosItem>();
                 _counters = new Dictionary<string, int>();
@@ -102,23 +107,23 @@ namespace LeafToCRERPEImport
 
                 using (var reader = System.IO.File.OpenText(parsed.LeafExportFullPath))
                 {
-                    var leafStore = ServiceStack.Text.JsonSerializer.DeserializeFromReader<LeafDataModel.Store>(reader);
+                    using (var db = new CreModel())
+                    {
+                        var leafStore =
+                            ServiceStack.Text.JsonSerializer.DeserializeFromReader<LeafDataModel.Store>(reader);
 
-                    var api = new Api { Apikey = parsed.ApiKey, BaseUri = parsed.ServerUrl };
-
-                    SetupStore(api, leafStore);
-                    SetupTaxes(api, leafStore);
-                    SetupTenders(api, leafStore);
-                    SetupPrinters(api, leafStore);
-                    SetupJobCodes(api, leafStore);
-                    SetupUsers(api, leafStore);
-                    SetupDepartments(api, leafStore);
-                    SetupModifiers(api, leafStore);
-                    SetupModifierGroups(api, leafStore);
-                    SetupItems(api, leafStore);
-                    SetupMenu(api, leafStore);
+                        SetupStore(db, leafStore);
+                        SetupTaxes(db, leafStore);
+                        //SetupPrinters(db, leafStore);
+                        //SetupJobCodes(db, leafStore);
+                        //SetupUsers(db, leafStore);
+                        //SetupDepartments(db, leafStore);
+                        //SetupModifiers(db, leafStore);
+                        //SetupModifierGroups(db, leafStore);
+                        //SetupItems(db, leafStore);
+                        //SetupMenu(db, leafStore);
+                    }
                 }
-
                 stopwatch.Stop();
 
                 PrintResults();
@@ -136,6 +141,8 @@ namespace LeafToCRERPEImport
                 Log(ex.ToString());
             }
         }
+
+        #region Helpers
 
         private static void IncrementCounter(string counterName)
         {
@@ -164,6 +171,68 @@ namespace LeafToCRERPEImport
             Log("==============");
 
             counters.ForEach(pair => Log("{0} : {1}", pair.Key, pair.Value));
+        }
+
+        #endregion
+
+        private static void SetupStore(CreModel db, LeafDataModel.Store leafStore)
+        {
+            var setup = db.Setups.FirstOrDefault();
+            if (setup == null)
+            {
+                setup = new Setup {StoreID = "1001"};
+                db.Add(setup);
+            }
+
+            setup.CompanyInfo1 = leafStore.siteName;
+            setup.CompanyInfo2 = "";
+            setup.CompanyInfo3 = "";
+            setup.CompanyInfo4 = "";
+            setup.CompanyInfo5 = "";
+            setup.StoreEmail = leafStore.siteEmail;
+            setup.Phone1 = leafStore.sitePhone;
+            setup.Address = leafStore.primary_address.address;
+            setup.City = leafStore.primary_address.city;
+            setup.State = leafStore.primary_address.stateShort;
+            setup.ZipCode = leafStore.primary_address.postalCode;
+
+            db.SaveChanges();
+
+            IncrementCounter(Counters.Setup);
+            Log("Updated Store");
+        }
+
+        private static void SetupTaxes(CreModel db, LeafDataModel.Store leafStore)
+        {
+            var taxrate = db.TaxRates.FirstOrDefault();
+            if (taxrate == null)
+            {
+                return;
+            }
+
+            if (leafStore.salesTax != 0)
+            {
+                taxrate.Tax1Name = "salesTax";
+                taxrate.Tax1Rate = (float?) leafStore.salesTax;
+                _taxMap.Add("salesTax", 1);
+            }
+            if (leafStore.foodTax != 0)
+            {
+                taxrate.Tax2Name = "foodTax";
+                taxrate.Tax2Rate = (float?) leafStore.foodTax;
+                _taxMap.Add("foodTax", 2);
+            }
+            if (leafStore.bevTax != 0)
+            {
+                taxrate.Tax3Name = "bevTax";
+                taxrate.Tax3Rate = (float?) leafStore.bevTax;
+                _taxMap.Add("bevTax", 3);
+            }
+
+            db.SaveChanges();
+
+            IncrementCounter(Counters.TaxRate);
+            Log("Updated Tax Rates");
         }
     }
 }
